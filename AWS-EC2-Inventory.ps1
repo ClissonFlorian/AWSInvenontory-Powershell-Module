@@ -15,8 +15,16 @@ if (-NOT (test-path $ExportDirectory)) {
 $aws_region = Get-AWSRegion
 $Regions = ($aws_region).Region
 
+#region functions    
+    function Export-EC2KeyPair {
+        [CmdletBinding()]
+        param (
+            [Parameter(Mandatory = $true)][object]$Region
+        )
+        $Data = Get-EC2KeyPair -Region $Region
+        return $Data
+    }
 
-#region functions
     function Export-Region {
         $Data = Get-AWSRegion
         return $Data
@@ -96,6 +104,7 @@ $Regions = ($aws_region).Region
         }
         $Export_Aws_AvailabilityZone = Export-EC2AvailabilityZone -Region $Region
         $Export_Aws_EC2Tag = Export-EC2Tag -Region $Region
+        $Export_Aws_EC2KeyPair = Export-EC2KeyPair -Region $Region
         
         $FileName = Get-Variable -Name "Export_Aws_*" -Scope Local
 
@@ -108,7 +117,7 @@ $Regions = ($aws_region).Region
                     Remove-Item -Path $FilePath -Force | Out-Null
                 }
             }
-            $Data | Format-Table
+ 
             if($Data){
                 Write-Host "addded $FilePath" -ForegroundColor Green
                 $Data| Export-Csv -Path "$FilePath" -NoTypeInformation -Append
