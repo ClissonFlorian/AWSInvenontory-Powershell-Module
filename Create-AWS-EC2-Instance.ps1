@@ -3,9 +3,6 @@ function New-PSEC2Instance {
     param (
         [Parameter(Mandatory = $true)][string]$serverName,
         [Parameter(Mandatory = $false)][string]$Region="eu-west-3",
-        #[Parameter(Mandatory = $true)][string]$domainName,
-        #[Parameter(Mandatory = $true)][string]$domainUser,
-        #[Parameter(Mandatory = $true)][string]$domainPassword,
         [Parameter(Mandatory = $true)][string]$amiId,
         [Parameter(Mandatory = $true)][string]$instanceType,
         [Parameter(Mandatory = $true)][string]$keyName,
@@ -141,9 +138,9 @@ function New-PSEC2Instance {
 
 
     if (!$adminPassword) {
-        Write-Warning "No admin password retrieved for instance $instanceId, aborting." -ForegroundColor Yellow
+        Write-Warning "No admin password retrieved for instance $instanceId, aborting."
         Write-Warning "Terminating instance id '$instanceId'"
-        Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm $false
+        Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm:$false
         exit;
     }
 
