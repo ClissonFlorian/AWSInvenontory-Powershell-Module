@@ -22,6 +22,7 @@ $Regions = ($aws_region).Region
             [Parameter(Mandatory = $true)][object]$Region
         )
         $Data = Get-EC2KeyPair -Region $Region
+        $Data | Add-Member -MemberType NoteProperty "RegionName" -Value "$Region"
         return $Data
     }
 
@@ -90,6 +91,9 @@ $Regions = ($aws_region).Region
         $Data | Add-Member -MemberType NoteProperty "RegionName" -Value "$Region"
         return $Data
     }
+
+
+
 #end region
 
 

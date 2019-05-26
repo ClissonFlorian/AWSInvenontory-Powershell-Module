@@ -1,212 +1,271 @@
+$ErrorActionPreference = "Stop"
+
+function Clean-HashTable {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [pscustomobject]$Hashtable
+    )
+
+    $params = New-Object PSobject -property $Hashtable
+    $NewHashTable = $params.psobject.properties | Where-Object { $_.value -ne "" } | Select-Object Name,Value
+    return $NewHashTable
+}
+
+
+
+
 function New-PSEC2Instance {
 
     param (
         [Parameter(Mandatory = $true)][string]$serverName,
-        [Parameter(Mandatory = $false)][string]$Region="eu-west-3",
+        [Parameter(Mandatory = $false)][string]$Region = "eu-west-3",
         [Parameter(Mandatory = $true)][string]$amiId,
         [Parameter(Mandatory = $true)][string]$instanceType,
-        [Parameter(Mandatory = $true)][string]$keyName,
-        [Parameter(Mandatory = $true)][string]$securityGroups
-        #[Parameter(Mandatory = $true)][string]$subnetId
+        [Parameter(Mandatory = $true)][string]$securityGroups,
+        [Parameter(Mandatory = $true)][string]$KeyPairName,
+        [Parameter(Mandatory = $false)][string]$PemFile,
+        [Parameter(Mandatory = $false)][switch]$NoNewKeyPair
     )
 
-    #=====================================================================================
-    # Initialise the AWS SDK and import the helpers
     #
-    # Download: https://aws.amazon.com/powershell/
-    # Docs: http://docs.aws.amazon.com/powershell/latest/reference/Index.html
-    #
-    #=====================================================================================
-    & Initialize-AWSDefaults
+    # ─── TODO ───────────────────────────────────────────────────────────────────────
+    # Adding New Volume Creation
+ 
+    try {
+        
+        #
+        # ─── INITIALISE THE AWS SDK AND IMPORT THE HELPERS ───────────────
+        # Download: https://aws.amazon.com/powershell/
+        # Docs: http://docs.aws.amazon.com/powershell/latest/reference/Index.html
+        # ─────────────────────────────────────────────────────────────────
 
-    #=====================================================================================
-    # Login
-    #=====================================================================================
-    $sessionCreds = Get-AWSCredentials;
+        & Initialize-AWSDefaults
 
-    if (!$sessionCreds) {
-        $awsKey = Read-Host "Enter the AWS access key"
-        $awsSecretKey = Read-Host "Enter the AWS secret key"
-    }
-    else {
-        $awsKey = $sessionCreds.GetCredentials().AccessKey
-        $awsSecretKey = $sessionCreds.GetCredentials().SecretKey
-    }
+        #
+        # ─── LOGIN ───────────────────────────────────────────────────────
+        #
 
-    Set-AWSCredentials -AccessKey $awsKey -SecretKey $awsSecretKey
-    Set-DefaultAWSRegion -Region $Region
-    #=====================================================================================
-    # Create a key pair for decrypting the Windows password
-    #=====================================================================================
-    $pemFullPath = "$pwd\$keyName.pem"
+        $sessionCreds = Get-AWSCredentials;
 
-    #=====================================================================================
-    # Create the AWS instance from an AMI
-    #=====================================================================================
-    Write-Host "=> Creating '$instanceType' instance from ami '$amiId' in subnet '$subnetId'..." -ForegroundColor Magenta
+        if (!$sessionCreds) {
+            $awsKey = Read-Host "Enter the AWS access key"
+            $awsSecretKey = Read-Host "Enter the AWS secret key"
+        }
+        else {
+            $awsKey = $sessionCreds.GetCredentials().AccessKey
+            $awsSecretKey = $sessionCreds.GetCredentials().SecretKey
+        }
 
-    $securityGroups = $securityGroups.Replace(' ', '')
-    $securityGroupId = $securityGroups.Split(',')
+        Set-AWSCredentials -AccessKey $awsKey -SecretKey $awsSecretKey
+        Set-DefaultAWSRegion -Region $Region
 
-    $parameters = @{
-        AssociatePublicIp = $false
-        ImageId           = $amiId
-        InstanceType      = $instanceType
-        KeyName           = $keyName
-        SecurityGroupId   = $securityGroupId
-        Region            = $Region
-        #SubnetId          = $subnetId
-    }
+        #
+        # ─── CREATE A KEY PAIR FOR DECRYPTING THE WINDOWS PASSWORD ───────
+        #
 
-    $data = New-EC2Instance @parameters
+        if($NoNewKeyPair){
+            
+            Write-Host "=> Checking AWS Key Pair $KeyPairName..." -NoNewline
+            # FIXME Compare key pair with PemFile before to continue
+            $GetKeyPair = (Get-EC2KeyPair -KeyName "$KeyPairName").KeyMaterial
+            Write-Host "OK" -ForegroundColor Green
+            
+            Write-Host "=> Test-Path keyPair path $PemFile..." -NoNewline
+            if(-NOT (Test-path $PemFile)){
+                Write-Error -Message "Not found"
+            }
+            Write-Host "OK" -ForegroundColor Green
 
-    if (!$data -or $data.Instances.Length -ne 1) {
-        Write-Warning "No instance data was returned from AWS"
-        exit 1;
-    }
+        }else{
+           
+            Write-Host "=> Creating KeyPair '$KeyPairName' and save key to '$PemFile'..." -NoNewline
+            # FIXME Adding Force Mode (Otherwrite file)
+            if(Test-path $PemFile){
+                Write-Error -Message "This $PemFile file already exist"
+            }
 
-    $instance = $data.Instances[0]
-    $instanceId = $instance.InstanceId
+            $GetKeyPair = (New-EC2KeyPair -KeyName "$KeyPairName").KeyMaterial
+            $GetKeyPair | Out-File "$PemFile"
+            Write-Host "OK" -ForegroundColor Green
+        }
 
-    # Name it
-    $tag = New-Object Amazon.EC2.Model.Tag
-    $tag.Key = "Name"
-    $tag.Value = "$serverName"
-    New-EC2Tag -Tag $tag -Resource $instanceId
 
-    $tag = New-Object Amazon.EC2.Model.Tag
-    $tag.Key = "AddedBy"
-    $tag.Value = $env:USERNAME
-    New-EC2Tag -Tag $tag -Resource $instanceId
+        # Write-Host "=> Compare keyPair and Pem File..." -NoNewline
+        # $pemContent = Get-Content -Path $PemFile
+        # if($GetKeyPair -eq $pemContent){
+        
+        #     Write-Host "OK" -ForegroundColor Green
+        
+        # }else{
+        #     Write-Error "KeyPair doesn't match between aws key and pem file"
+        # }
+     
 
-    #=====================================================================================
-    # Wait for the instance to be running
-    #
-    # Docs: http://docs.aws.amazon.com/sdkfornet1/latest/apidocs/html/P_Amazon_EC2_Model_InstanceState_Name.htm
-    # - valid values are: pending | running | shutting-down | terminated | stopping | stopped
-    #
-    #=====================================================================================
-    $data = Get-EC2Instance -InstanceId $instanceId -Region $Region
-    $currentState = $data.Instances[0].State.Name;
+        #
+        # ─── CREATE THE AWS INSTANCE FROM AN AMI ─────────────────────────
+        #
 
-    while ($currentState -ne "running") {
-        Write-Debug "Waiting 60 seconds for instance '$instanceId' to be in a 'running' state (currently '$currentState')..."
-        Sleep 60
+        Write-Host "=> Creating '$instanceType' instance from ami '$amiId' in subnet '$subnetId'..." -NoNewline
+
+        $securityGroups = $securityGroups.Replace(' ', '')
+        $securityGroupId = $securityGroups.Split(',')
+
+        $parameters = @{
+            AssociatePublicIp = $false
+            ImageId           = $amiId
+            InstanceType      = $instanceType
+            KeyName           = $KeyPairName
+            SecurityGroupId   = $securityGroupId
+            Region            = $Region
+            #SubnetId          = $subnetId
+        }
+
+        $data = New-EC2Instance @parameters
+        Write-Host "OK" -ForegroundColor Green
+
+        if (!$data -or $data.Instances.Length -ne 1) {
+            Write-Warning "No instance data was returned from AWS"
+            exit 1;
+        }
+
+        #
+        # ─── ADDING AWS TAGS ─────────────────────────────────────────────
+        #
+
+        $instance = $data.Instances[0]
+        $script:instanceId = $instance.InstanceId
+
+        Write-Host "=> Adding tags to '[$instanceType][$instanceId]'..." -NoNewline
+        $Tags = @( 
+            @{key="Name";value="James"},
+            @{key="CreatedBy";value="James"},
+            @{key="Department";value="Solutions Architecture"} 
+        )
+        New-EC2Tag -Tag $tags -Resource $instanceId
+        Write-Host "OK" -ForegroundColor Green
+
+
+        #
+        # ─── WAIT FOR THE INSTANCE TO BE RUNNING ─────────────────────────
+        #
+        #   Docs: http://docs.aws.amazon.com/sdkfornet1/latest/apidocs/html/P_Amazon_EC2_Model_InstanceState_Name.htm
+        #   - valid values are: pending | running | shutting-down | terminated | stopping | stopped
+        #
+        # ─────────────────────────────────────────────────────────────────
 
         $data = Get-EC2Instance -InstanceId $instanceId -Region $Region
         $currentState = $data.Instances[0].State.Name;
-    }
 
-    Write-Debug "instance '$instanceId' is now state '$currentState'"
+        while ($currentState -ne "running") {
+            Write-Debug "Waiting 60 seconds for instance '$instanceId' to be in a 'running' state (currently '$currentState')..."
+            Start-Sleep 60
 
-    $data = Get-EC2Instance -InstanceId $instanceId -Region $Region
-    $ip = $data.Instances[0].PrivateIpAddress
-
-    if (!$ip) {
-        Write-Warning "No ip found for instance $instanceId, aborting."
-        Write-Warning "Terminating $instanceId"
-        Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm:$false
-        exit;
-    }
-
-    Write-Debug "The IP of instance '$instanceId' is '$ip'"
-
-    #=====================================================================================
-    # Decrypt and get the administrator password
-    #=====================================================================================
-    Write-Host "=> Retrieving the encrypted administrator password..." -ForegroundColor Magenta
-
-    $tries = 10;
-    $tryCount = 0;
-
-    while ($tryCount -lt $tries) {
-        try {
-            $adminPassword = Get-EC2PasswordData -InstanceId $instanceId -PemFile $pemFullPath
-        }
-        catch {
-            $adminPassword = ""
+            $data = Get-EC2Instance -InstanceId $instanceId -Region $Region
+            $currentState = $data.Instances[0].State.Name;
         }
 
-        if ($adminPassword) {
-            break;
+        Write-Debug "instance '$instanceId' is now state '$currentState'"
+
+        $data = Get-EC2Instance -InstanceId $instanceId -Region $Region
+        $ip = $data.Instances[0].PrivateIpAddress
+
+        if (!$ip) {
+            Write-Warning "No ip found for instance $instanceId, aborting."
+            Write-Warning "Terminating $instanceId"
+            Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm:$false
+            exit;
         }
 
-        $tryCount += 1;
-        Write-Debug "Waiting 60 seconds for administrator password (attempt $tryCount of $tries)..."
-        Sleep 60
-    }
+        #
+        # ─── DECRYPT AND GET THE ADMINISTRATOR PASSWORD ──────────────────
+        #
 
+        Write-Host "=> Retrieving the encrypted administrator password..." 
 
-    if (!$adminPassword) {
-        Write-Warning "No admin password retrieved for instance $instanceId, aborting."
-        Write-Warning "Terminating instance id '$instanceId'"
-        Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm:$false
-        exit;
-    }
+        $tries = 10;
+        $tryCount = 0;
 
-    Write-Debug "The administrator password is '$adminPassword'"
+        while ($tryCount -lt $tries) {
+            try {
+                $adminPassword = Get-EC2PasswordData -InstanceId $instanceId -PemFile "$PemFile"
+            }
+            catch {
+                $adminPassword = ""
+            }
 
-    $Error.Clear();
+            if ($adminPassword) {
+                break;
+            }
 
-    #=====================================================================================
-    # Open up WinRM on the machine, lock it down later
-    #=====================================================================================
-    Write-Host "=> Configuring WinRM client to connect to AWS..." -ForegroundColor Magenta
-
-    winrm quickconfig
-    Set-Item WSMan:\localhost\Client\TrustedHosts -Value "*" -Force
-    Set-Item WSMan:\localhost\Client\AllowUnencrypted -Value $true -Force
-
-    #=====================================================================================
-    # Wait for WinRM to appear
-    #=====================================================================================
-    Write-Host "=> Waiting for WinRM to be enabled on the server..." -ForegroundColor Magenta
-
-    Test-WinRMConnection $adminPassword $ip $instanceId
-
-    #=====================================================================================
-    # Set Region and Language Settings (Windows 2012)
-    #=====================================================================================
-    Write-Host "=> Configuring region and language settings..." -ForegroundColor Magenta
-
-    # GetNewRemoteSession is a helper for new-pssession
-    $session = GetNewRemoteSession $ip $adminPassword
-
-    # For the system locale (requires restart)
-    Invoke-Command -Session $session -ScriptBlock { Set-WinSystemLocale en-GB }
-
-    # For the current user account
-    Invoke-Command -Session $session -ScriptBlock { Set-Culture en-GB }
-    Invoke-Command -Session $session -ScriptBlock { Set-WinHomeLocation -GeoId 242 }
-    Invoke-Command -Session $session -ScriptBlock { Set-WinUserLanguageList en-GB -Force }
-
-    #=====================================================================================
-    # Terminate the instance if there were errors
-    #=====================================================================================
-    if ($Error.Count -eq 0) {
-        Write-Information "`nFinished. '$instanceId' is alive!"
-    }
-    else {
-        Write-Warning "`nErrors occurred (use `$Error to view them)"
-        Write-Host ""
-        $terminate = Read-Host "Do you want to terminate the instance? ([Y/N])"
-
-        if ($terminate.ToLower() -eq "y") {
-            Write-Debug "Terminating instance id '$instanceId'"
-            $state = Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm:$false
-            Write-Debug "Instance id '$instanceId' new state is $($state.CurrentState)"
+            $tryCount += 1;
+            Write-Debug "Waiting 60 seconds for administrator password (attempt $tryCount of $tries)..."
+            Start-Sleep 60
         }
+
+
+        if (!$adminPassword) {
+            Write-Warning "No admin password retrieved for instance $instanceId, aborting."
+            Write-Warning "Terminating instance id '$instanceId'"
+            Stop-EC2Instance -Instance $instanceId -Terminate -Force -Confirm:$false
+            exit;
+        }
+
+        Write-Host "The IP of instance '$instanceId' is '$ip'"
+        Write-Host "The administrator password is '$adminPassword'"
+    
+    }catch{
+        Write-Host "KO" -ForegroundColor Red
+        Write-Host $PSItem -ForegroundColor Red
     }
 }
 
+$Region = "eu-west-3c"
+Set-DefaultAWSRegion -Region $Region
+$sessionCreds = Get-AWSCredentials;
+$awsKey = $sessionCreds.GetCredentials().AccessKey
+$awsSecretKey = $sessionCreds.GetCredentials().SecretKey
+Set-AWSCredentials -AccessKey $awsKey -SecretKey $awsSecretKey
 
 $parameters = @{
 
     serverName     = "PSGUI"
     amiId          = "ami-0a3421f99d36f7006"
     instanceType   = "t2.micro" 
-    KeyName        = "Administrators"
     securityGroups = "sg-04b97f6d024193934"
+    KeyPairName    = "Administrators6"
+    PemFile        = "C:\Temp\Administrators6.pem"
+    NoNewKeyPair   = $false
+    Region         = "eu-west-3c"
 }
 
 New-PSEC2Instance @parameters
+
+
+
+#
+# ─── VOLUMES ────────────────────────────────────────────────────────────────────
+#
+
+$HardDisks = @(
+    @{SnapshotId = "";Size = 80;AvailabilityZone = "eu-west-3c";VolumeType = "gp2";Encrypted = $false;Iops = "";KmsKeyId = "";TagSpecification = "";Force=$false}
+    @{SnapshotId = "";Size = 90;AvailabilityZone = "eu-west-3c";VolumeType = "gp2";Encrypted = $false;Iops = "";KmsKeyId = "";TagSpecification = "";Force=$false}
+)
+
+try{
+    $HardDisks | ForEach-Object {
+        Write-Host "=> Create New Volume..." -NoNewline
+        
+        $Volume = New-EC2Volume -Size $($_.Size) -AvailabilityZone "$($_.AvailabilityZone)" -VolumeType "$($_.VolumeType)"
+        #$Volume = New-EC2Volume -Size 50 -AvailabilityZone "eu-west-3c" -VolumeType gp2 -Region eu-west-3
+        Write-Host "OK" -ForegroundColor Green
+
+        $VolumeId = $Volume.id
+        Write-Host "=> Attach volume [$volumeId] to [$instanceId]..." -NoNewline
+        #Add-EC2Volume -InstanceId $instanceId -VolumeId $VolumeId -Device -Force
+        Write-Host "OK" -ForegroundColor Green
+    }
+}catch{
+
+    Write-Host $PSItem -ForegroundColor Red
+}
