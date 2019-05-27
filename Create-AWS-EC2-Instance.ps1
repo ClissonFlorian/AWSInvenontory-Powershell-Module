@@ -220,7 +220,7 @@ function New-PSEC2Instance {
     }
 }
 
-$Region = "eu-west-3c"
+$Region = "eu-west-3"
 Set-DefaultAWSRegion -Region $Region
 $sessionCreds = Get-AWSCredentials;
 $awsKey = $sessionCreds.GetCredentials().AccessKey
@@ -233,15 +233,15 @@ $parameters = @{
     amiId          = "ami-0a3421f99d36f7006"
     instanceType   = "t2.micro" 
     securityGroups = "sg-04b97f6d024193934"
-    KeyPairName    = "Administrators6"
-    PemFile        = "C:\Temp\Administrators6.pem"
+    KeyPairName    = "Administrators7"
+    PemFile        = "C:\Temp\Administrators7.pem"
     NoNewKeyPair   = $false
-    Region         = "eu-west-3c"
+    Region         = "eu-west-3"
 }
 
 New-PSEC2Instance @parameters
 
-
+pause
 
 #
 # ─── VOLUMES ────────────────────────────────────────────────────────────────────
@@ -260,9 +260,9 @@ try{
         #$Volume = New-EC2Volume -Size 50 -AvailabilityZone "eu-west-3c" -VolumeType gp2 -Region eu-west-3
         Write-Host "OK" -ForegroundColor Green
 
-        $VolumeId = $Volume.id
+        $VolumeId = $Volume.VolumeId
         Write-Host "=> Attach volume [$volumeId] to [$instanceId]..." -NoNewline
-        #Add-EC2Volume -InstanceId $instanceId -VolumeId $VolumeId -Device -Force
+        Add-EC2Volume -InstanceId $instanceId -VolumeId $VolumeId -Device -Force
         Write-Host "OK" -ForegroundColor Green
     }
 }catch{
