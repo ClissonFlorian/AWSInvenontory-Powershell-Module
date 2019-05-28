@@ -233,15 +233,14 @@ $parameters = @{
     amiId          = "ami-0a3421f99d36f7006"
     instanceType   = "t2.micro" 
     securityGroups = "sg-04b97f6d024193934"
-    KeyPairName    = "Administrators7"
-    PemFile        = "C:\Temp\Administrators7.pem"
+    KeyPairName    = "Administrators10"
+    PemFile        = "C:\Temp\Administrators10.pem"
     NoNewKeyPair   = $false
     Region         = "eu-west-3"
 }
 
 New-PSEC2Instance @parameters
 
-pause
 
 #
 # ─── VOLUMES ────────────────────────────────────────────────────────────────────
@@ -253,17 +252,29 @@ $HardDisks = @(
 )
 
 try{
+    $Count=1
+    $AZ = [char[]](65..90)
     $HardDisks | ForEach-Object {
         Write-Host "=> Create New Volume..." -NoNewline
         
         $Volume = New-EC2Volume -Size $($_.Size) -AvailabilityZone "$($_.AvailabilityZone)" -VolumeType "$($_.VolumeType)"
+        $VolumeId = $Volume.VolumeId
         #$Volume = New-EC2Volume -Size 50 -AvailabilityZone "eu-west-3c" -VolumeType gp2 -Region eu-west-3
         Write-Host "OK" -ForegroundColor Green
 
-        $VolumeId = $Volume.VolumeId
+        Do{
+            Sleep -Seconds 2
+            $VolumeState = (Get-EC2Volume -VolumeId $VolumeId).State
+            #FIXME  Timeout to add
+
+        }while($VolumeState -ne "available")
+        
+        
         Write-Host "=> Attach volume [$volumeId] to [$instanceId]..." -NoNewline
-        Add-EC2Volume -InstanceId $instanceId -VolumeId $VolumeId -Device -Force
+        $DeviceName = ("xvd$($AZ[$Count])").ToLower()  
+        Add-EC2Volume -InstanceId $instanceId -VolumeId $VolumeId -Device "$DeviceName" -Force
         Write-Host "OK" -ForegroundColor Green
+        $Count++
     }
 }catch{
 
